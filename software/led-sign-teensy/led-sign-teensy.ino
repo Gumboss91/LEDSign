@@ -1,25 +1,43 @@
 #include <OctoWS2811.h>
 
-
 #define NUMPIXELS  300
 #define PIN    6
 #define SEGLEN 7
 #define SETCOLOR 0x0F0000
 
+// States for the final state maschine
 enum {cntdwn, settimer};
 int state = cntdwn;
 
-IntervalTimer myTimer, digitFlash;
+// States for the keypress
+enum {noKey = 0, modMode = 1, resetTimer = 2, modDigit = 3, modValue = 4};
+int key = noKey;
 
+// Active digit to modefy
+enum {secondDigit = 0; minuteDigit = 1, hourDigit = 2};
+int activeDigit = secondDigit;
+
+// Physische Keys am Teensy Board
+int key1 = 0, old_key1 = 0; // IO 0
+int key2 = 0, old_key2 = 0; // IO 1
+int key3 = 0, old_key3 = 0; // IO 23
+
+// Interrupt Timer setup
+IntervalTimer myTimer, digitFlash;
+volatile byte tick = 0;
+
+// OctoWS expansion for Teensy board definitions
 DMAMEM int displayMemory[NUMPIXELS*6];
 int drawingMemory[NUMPIXELS*6];
-
 OctoWS2811 pixels(NUMPIXELS, displayMemory, drawingMemory,  WS2811_GRB | WS2811_800kHz);
 
-volatile byte prestate = 0;
-volatile byte tick = 0;
-volatile int numdisp = 55;
+//Display Values
+volatile int sectotal = 60*60;
+volatile int h = 1;
+volatile int m = 0;
+volatile int s = 0;
 
+//  --- 7-Segement Definitionen
 //                      1  2  3  4  5  6  7
 char number[11][7] = { {1, 1, 1, 0, 1, 1, 1}, // 0
                        {0, 0, 1, 0, 0, 0, 1}, // 1
@@ -42,13 +60,11 @@ void setdigit(char num, char digitPos){
   int segOffset = 0;
   int n,i =0;
 
-  // 
   if( num <0 || num > 9)
     return;
   if( digitPos <0 || digitPos > 5)
     return;
 
- 
   segOffset = (5-digitPos)*SEGLEN*7;
   
   for (i=0;i<7;i++){
@@ -78,30 +94,8 @@ void incSingleDigit(int digitPos){
   int maxdigitnum = 0;
   if( digitPos <0 || digitPos > 5)
     return;
-  Serial.print("int(pow(10,digitPos+1)): ");
-  Serial.println(int(pow(10,digitPos+1)),DEC);
-  
-  Serial.print("int(pow(10,digitPos)): ");
-  Serial.println(int(pow(10,digitPos)),DEC);
-
-  Serial.print("numdisp: ");
-  Serial.println(numdisp,DEC);
-
-  Serial.print("digitPos: ");
-  Serial.println(digitPos,DEC);
-  
-  Serial.print("numdisp + int(pow(10,digitPos)): ");
-  Serial.println((numdisp + int(pow(10,digitPos))),DEC);
-  
-  Serial.print("numdisp+1: ");
-  Serial.println(numdisp+1,DEC);
-  
-  
   maxdigitnum = int(numdisp/(10*digitPos));
 
-  Serial.print("maxdigitnum: ");
-  Serial.println(maxdigitnum,DEC);
-  
   if( (int(pow(10,digitPos+1)) ) == numdisp+int(pow(10,digitPos+1)) )
     numdisp = numdisp - int(pow(10,digitPos+1));
   else
@@ -143,55 +137,76 @@ void setup() {
 }
 
 
-int preButton0State = 1;
-int preButton1State = 1;
-int preButton23State = 1;
-int oldDigitColor = 0x0F0F0F;
-int digitSetPos = 0;
-
+// Timer für lange gehaltene keys
 void loop() {
-//  Serial.println(state,DEC);
+// decondign welcher Key gedrückt wurde und wie lange
+  // Übernehmen des aktuellen Status
+  key1 = digitalRead(0);
+  key2 = digitalRead(1);
+  key3 = digitalRead(23);
+  // Keydeaction
+  if(key1 == 1 && old_key1 == 0) {   // Steigende Flanke Key 1
+    key = modMode;
+    //Start Timer
+    timer1_val = 0;                  // wird Key1 lange gehalten?
+    timer1_modus = 1;
+  } else if(key1 == 0 && old_key1 == 1) {  // fallende Flanke
+    // Stop Timer
+    timer1_modus = 0;
+    if(timer1_val > 400) { // 
+      key = resetTimer;
+    }
+    timer1_val = 0;
+  } else if(key2 && old_key2 == 0) { // geht in den bearbeitungs modus
+    key = modDigit;
+  } else if(key3 && old_key3 == 0) { // geht in den zählmodus
+    key = modValue;
+  }
+  old_key1 = key1;
+  old_key2 = key2;
+  old_key3 = key3;
+
+  // Timer for long key press
+  if(timer1_modus == 1) {
+    timer1_val++;
+  }
+  
   switch (state){
     case cntdwn: 
-                  if( preButton0State == 1 &&  digitalRead(0) == 0){
-                    state = settimer;
-                    digitSetPos = 0;
-                    oldDigitColor = getDigitColor(digitSetPos);
-                    setDigitColor(digitSetPos, SETCOLOR);
-                  }
+                 if(key ==  modMode){
+                   state = settimer;
+                 }
+
+                 // Display number 
+                 if(sectotal-1 > 0 )
+                    sectotal = (sectotal -1);
+                 
+                 h = extractH(sectotal);
+                 m = extractM(h, sectotal);
+                 s = extractS(h, m, sectotal);
+                 
+                 break;
                   
-                  setNum(numdisp);
-                  pixels.show();
-                  break;
+    case settimer: 
+                 if(key = modDigit){
+                   switch(activeDigit) {
+                     case secondDigit:  s = (s+1)%60; break;
+                     case minuteDigit:  m = (m+1)%60; break;
+                     case hourDigit:    h = (h+1)%99; break;
+                     default : break;
+                   }
+                 }else if(key == modValue){
+                   activeDigit = (activeDigit+1)%3;
+                 }
+                 }else if(key == modMode){
+                   state = cntdwn;
+                 }
                   
-     case settimer: 
-                  if( preButton0State == 1 &&  digitalRead(0) == 0){
-                    state = cntdwn;
-                    setDigitColor(digitSetPos, oldDigitColor);
-                  }
-                    
-                  if( preButton1State == 1 &&  digitalRead(1) == 0)
-                   // numdisp = (numdisp + int(pow(10,digitSetPos)))%int(pow(10,digitSetPos+1));
-                    incSingleDigit(digitSetPos);
-                    
-                  
-                  if( preButton23State == 1 &&  digitalRead(23) == 0){
-                     setDigitColor(digitSetPos, oldDigitColor);
-                     digitSetPos = (digitSetPos + 1)%6;
-                     oldDigitColor = getDigitColor(digitSetPos);
-                     setDigitColor(digitSetPos, SETCOLOR);
-                  }
-                  
-                  setNum(numdisp);
-                  pixels.show();
-                  break;
+                 break;
     default: break;              
     }
-    
-    preButton0State = digitalRead(0);
-    preButton1State = digitalRead(1);
-    preButton23State = digitalRead(23);
-   
+
+  dislay(h, m, s);
   
   delay(10);
 }
