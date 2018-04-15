@@ -136,7 +136,7 @@ void incrementDigit(){
     else
       s = int(s/10)*10;
   } else if( activeDigit == 1){
-    if( s <= 50)
+    if( s < 50)
       s = s +10;
     else
       s = s - 50;
@@ -146,7 +146,7 @@ void incrementDigit(){
     else
       m = int(m/10)*10;
   } else if( activeDigit == 3){
-    if( m <= 50)
+    if( m < 50)
       m = m +10;
     else
       m = m - 50;
@@ -156,7 +156,7 @@ void incrementDigit(){
     else
       h = int(h/10)*10;
   } else if( activeDigit == 5){
-    if( h <= 50)
+    if( h < 50)
       h = h +10;
     else
       h = h - 50;
